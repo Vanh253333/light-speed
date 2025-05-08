@@ -14,6 +14,9 @@ hann_window = {}
 
 parser = ArgumentParser()
 parser.add_argument("--dataset-dir", type=Path, default="dataset")
+parser.add_argument("--tfdata-dir", type=Path, default="tfdata")
+parser.add_argument("--config-path", type=Path, default="../config.json")
+parser.add_argument("--chunk-size", type=int, default=256)
 FLAGS = parser.parse_args()
 
 def spectrogram_torch(y, n_fft, sampling_rate, hop_size, win_size, center=False):
@@ -95,9 +98,9 @@ def write_split(split, data, num_chunks):
     data = np.array(data, dtype=object)
     chunks = list(np.array_split(data, num_chunks))
     for i, chunk in enumerate(tqdm(chunks)):
-        write_tfdata(chunk, f"tfdata/{split}/part_{i:03d}.tfrecords")
+        write_tfdata(chunk, f"{FLAGS.tfdata_dir}/{split}/part_{i:03d}.tfrecords")
 
-with open("../config.json", "rb") as f:
+with open(FLAGS.config_path, "rb") as f:
     config = json.load(f)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 data_dir = FLAGS.dataset_dir
@@ -118,7 +121,7 @@ for file_path in json_files:
         duration = end * 1000 - start * 1000 # ms
         phone_set.append(phone)
         seq.append( (phone, duration) )
-    wav_file = file_path.with_suffix(".mp3")
+    wav_file = file_path.with_suffix(".wav")
     dataset.append((wav_file, seq, data["end"]))
 
 phone_set = ["<SEP>"] + sorted(set(phone_set))
@@ -136,4 +139,4 @@ print("Train data size:", len(train_data))
 print("Test data size:", len(test_data))
 
 write_split("test", test_data, 1)
-write_split("train", train_data, 256)
+write_split("train", train_data, FLAGS.chunk_size)

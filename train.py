@@ -22,6 +22,10 @@ from models import MultiPeriodDiscriminator, SynthesizerTrn
 from tfloader import load_tfdata
 import gc
 
+import warnings
+warnings.filterwarnings("ignore")
+os.environ["PYTHONWARNINGS"] = "ignore"
+
 #### COMMAND LINE ARGUMENTS ####
 parser = ArgumentParser()
 parser.add_argument("--config", type=str, default="config.json")
@@ -33,7 +37,7 @@ parser.add_argument("--compile", action="store_true", default=False)
 parser.add_argument("--device", type=str, default="cuda")
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--ckpt-interval", type=int, default=5_000)
-parser.add_argument("--rm-old-ckpt", action="store_true", default=False)
+parser.add_argument("--rm-old-ckpt", action="store_true", default=True)
 FLAGS = parser.parse_args()
 with open(FLAGS.config, "rb") as f:
     hps = json.load(f, object_hook=lambda x: SimpleNamespace(**x))
@@ -163,33 +167,44 @@ def plot_spectrogram_to_numpy(spectrogram):
     plt.ylabel("Channels")
     plt.tight_layout()
     fig.canvas.draw()
-    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
-    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    #data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
+    #data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    data = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+    (w,h) = fig.canvas.get_width_height()
+    data = data.reshape((h,w,4))[:,:,:3]
     plt.close()
     return data
 
 
 def prepare_batch(batch):
-    x = torch.from_numpy(batch["phone_idx"]).to(device, non_blocking=True).long()
-    x_lengths = (
-        torch.from_numpy(batch["phone_length"]).to(device, non_blocking=True).long()
-    )
-    spec = (
-        torch.from_numpy(batch["spec"])
-        .to(device, non_blocking=True)
-        .swapaxes(-1, -2)
-        .float()
-    )
-    spec_lengths = (
-        torch.from_numpy(batch["spec_length"]).to(device, non_blocking=True).long()
-    )
-    y = torch.from_numpy(batch["wav"]).to(device, non_blocking=True).float()[:, None, :]
-    y_lengths = (
-        torch.from_numpy(batch["wav_length"]).to(device, non_blocking=True).long()
-    )
-    duration = (
-        torch.from_numpy(batch["phone_duration"]).to(device, non_blocking=True).float()
-    )
+    #x = torch.from_numpy(batch["phone_idx"]).to(device, non_blocking=True).long()
+    #x = torch.from_numpy(np.copy(batch["phone_idx"])).to(device, non_blocking=True).long()
+    #x_lengths = (
+    #    torch.from_numpy(batch["phone_length"]).to(device, non_blocking=True).long()
+    #)
+    #spec = (
+    #    torch.from_numpy(batch["spec"])
+    #    .to(device, non_blocking=True)
+    #    .swapaxes(-1, -2)
+    #    .float()
+    #)
+    #spec_lengths = (
+    #    torch.from_numpy(batch["spec_length"]).to(device, non_blocking=True).long()
+    #)
+    #y = torch.from_numpy(batch["wav"]).to(device, non_blocking=True).float()[:, None, :]
+    #y_lengths = (
+    #    torch.from_numpy(batch["wav_length"]).to(device, non_blocking=True).long()
+    #)
+    #duration = (
+    #    torch.from_numpy(batch["phone_duration"]).to(device, non_blocking=True).float()
+    #)
+    x = torch.from_numpy(np.copy(batch["phone_idx"])).to(device, non_blocking=True).long()
+    x_lengths = torch.from_numpy(np.copy(batch["phone_length"])).to(device, non_blocking=True).long()
+    spec = torch.from_numpy(np.copy(batch["spec"])).to(device, non_blocking=True).swapaxes(-1, -2).float()
+    spec_lengths = torch.from_numpy(np.copy(batch["spec_length"])).to(device, non_blocking=True).long()
+    y = torch.from_numpy(np.copy(batch["wav"])).to(device, non_blocking=True).float()[:, None, :]
+    y_lengths = torch.from_numpy(np.copy(batch["wav_length"])).to(device, non_blocking=True).long()
+    duration = torch.from_numpy(np.copy(batch["phone_duration"])).to(device, non_blocking=True).float()
     end_time = torch.cumsum(duration, dim=-1)
     start_time = end_time - duration
     start_frame = (
@@ -254,9 +269,15 @@ def evaluate(step):
         test_writer.add_image("mel_gt", gt_mel, step, dataformats="HWC")
     net_g.train()
 
+import logging
+
+# Khởi tạo logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # TRAINING LOOP ...
-for epoch in range(_epoch + 1, 100_000):
+for epoch in range(_epoch + 1, 20_000):
+    logger.info(f"Starting epoch {epoch}")
     ds = load_tfdata(
         FLAGS.tfdata,
         "train",
@@ -266,6 +287,7 @@ for epoch in range(_epoch + 1, 100_000):
         world_size=WORLD_SIZE,
     ).as_numpy_iterator()
     ds = tqdm(ds) if RANK == 0 else ds
+    #batch_idx= 0
     for batch in ds:
         step = step + 1
         x, x_lengths, spec, spec_lengths, y, y_lengths, attn = prepare_batch(batch)
@@ -342,6 +364,11 @@ for epoch in range(_epoch + 1, 100_000):
         optim_g.zero_grad()
 
         if RANK == 0:
+            #logger.info('Train Epoch: {} [{:.0f}%]'.format(
+             #   epoch,
+             #   100. * batch_idx / len(ds)))
+            #logger.info([x.item() for x in [loss_disc_all, loss_gen_all]] + [step, optim_g.param_groups[0]['lr']])
+
             train_writer.add_scalar(
                 "loss_disc_all", loss_disc_all.float(), global_step=step
             )
@@ -362,6 +389,7 @@ for epoch in range(_epoch + 1, 100_000):
             train_writer.add_scalar("grad_norm_g", grad_norm_g, global_step=step)
 
             if step % FLAGS.ckpt_interval == 0:
+                logger.info(f"Saving checkpoint at step {step}")
                 evaluate(step)
                 torch.save(
                     {
@@ -385,8 +413,12 @@ for epoch in range(_epoch + 1, 100_000):
                     del all_ckpts[0]
         gc.collect()
         torch.cuda.empty_cache()
+        #batch_idx += 1
     if RANK == 0:
         lr = optim_g.param_groups[0]["lr"]
+        logger.info([x.item() for x in [loss_disc_all, loss_gen_all]] + [step, lr])
+        logger.info('====> Epoch: {}'.format(epoch))
+        #lr = optim_g.param_groups[0]["lr"]
         train_writer.add_scalar("lr", lr, global_step=step)
     scheduler_g.step()
     scheduler_d.step()

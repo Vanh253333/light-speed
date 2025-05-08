@@ -53,7 +53,7 @@ def load_tfdata(root, split, batch_size):
 net = DurationNet(256, 64, 4).to(device)
 optim = Adafactor(net.parameters(), warmup_init=False)
 ema = ExponentialMovingAverage(net.parameters(), decay=0.995)
-batch_size = 4
+batch_size = 64
 num_epochs = 50
 
 def loss_fn(net, batch):

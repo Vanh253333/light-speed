@@ -4,8 +4,8 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 parser = ArgumentParser()
-parser.add_argument("--dataset-dir", type=Path, default="dataset")
-parser.add_argument("--tfdata-dir", type=Path, default="tfdata")
+parser.add_argument("--dataset-dir", type=Path, default="/home/osint/speech/data-text-female/data-text")
+parser.add_argument("--tfdata-dir", type=Path, default="/home/osint/speech/data-text-female/tfdata")
 FLAGS = parser.parse_args()
 
 FLAGS.tfdata_dir.mkdir(exist_ok=True, parents=True)
@@ -115,7 +115,7 @@ for fp in sorted(FLAGS.dataset_dir.glob("*.txt")):
         f.write(text)
 all_words = sorted(set((" ".join(all_text)).split()))
 
-with open("lexicon.txt", "w") as f:
+with open("/home/osint/speech/data-text-female/lexicon.txt", "w") as f:
     for w in all_words:
         w = w.strip()
         p = list(w)
